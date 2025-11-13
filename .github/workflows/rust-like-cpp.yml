@@ -1,4 +1,4 @@
-name: "Rust-like-C++ — 3OS Build + ProofLedger (Heap-Hop Edition)"
+name: "Rust-like-C++ — 3OS Build + ProofLedger"
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       - name: Install CMake (Linux/macOS)
         if: runner.os != 'Windows'
@@ -48,6 +48,7 @@ jobs:
           cmake --build . --config Release
 
       - name: Copy Executable
+        shell: bash
         run: |
           mkdir -p dist
           if [ "${{ runner.os }}" = "Windows" ]; then
@@ -90,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
