@@ -8,10 +8,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: rust-like-cpp-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build-3os:
     name: "Build on ${{ matrix.os }}"
@@ -22,61 +18,48 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install CMake (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          sudo apt-get update || true
-          sudo apt-get install -y cmake g++ || true
-
-      - name: Install CMake (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --yes
-
-      - name: Configure Project
+      - name: Configure
         run: |
           mkdir build
           cd build
           cmake ..
 
-      - name: Build Executable
+      - name: Build
         run: |
           cd build
           cmake --build . --config Release
 
-      - name: Copy Executable
+      - name: Prepare Dist
         shell: bash
         run: |
           mkdir -p dist
+
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp build/Release/rlc.exe dist/rlc-windows.exe
+            OS_TAG="windows"
           elif [ "${{ runner.os }}" = "macOS" ]; then
             cp build/rlc dist/rlc-macos
+            OS_TAG="macos"
           else
             cp build/rlc dist/rlc-linux
+            OS_TAG="linux"
           fi
 
-      - name: Generate ProofLedger
-        shell: bash
-        run: |
-          echo "ProofLedger for Rust-like-C++" > dist/proofledger.txt
-          echo "Commit: $GITHUB_SHA" >> dist/proofledger.txt
-          echo "Build OS: ${{ runner.os }}" >> dist/proofledger.txt
-          echo "Timestamp: $(date)" >> dist/proofledger.txt
+          # OS별 ledger/sha256 파일 생성
+          echo "ProofLedger for Rust-like-C++" > dist/proofledger-${OS_TAG}.txt
+          echo "Commit: $GITHUB_SHA" >> dist/proofledger-${OS_TAG}.txt
+          echo "Build OS: ${{ runner.os }}" >> dist/proofledger-${OS_TAG}.txt
+          echo "Timestamp: $(date)" >> dist/proofledger-${OS_TAG}.txt
 
-      - name: Generate SHA256
-        shell: bash
-        run: |
-          cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile rlc-windows.exe SHA256 > sha256.txt
+            certutil -hashfile dist/rlc-windows.exe SHA256 > dist/sha256-${OS_TAG}.txt
           elif [ "${{ runner.os }}" = "macOS" ]; then
-            shasum -a 256 rlc-macos > sha256.txt
+            shasum -a 256 dist/rlc-macos > dist/sha256-${OS_TAG}.txt
           else
-            sha256sum rlc-linux > sha256.txt
+            sha256sum dist/rlc-linux > dist/sha256-${OS_TAG}.txt
           fi
 
       - name: Upload Artifact
@@ -86,7 +69,7 @@ jobs:
           path: dist/
 
   release:
-    name: "Auto Release"
+    name: Auto Release
     needs: build-3os
     runs-on: ubuntu-latest
 
@@ -102,7 +85,7 @@ jobs:
           VERSION="v1.0.$(date +%Y%m%d%H%M)"
           echo "tag=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create Git Tag
+      - name: Create Tag
         run: |
           git tag ${{ steps.tag.outputs.tag }}
           git push origin ${{ steps.tag.outputs.tag }}
@@ -110,7 +93,7 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
 
-      - name: Create GitHub Release
+      - name: Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -118,5 +101,5 @@ jobs:
             */rlc-linux
             */rlc-macos
             */rlc-windows.exe
-            */proofledger.txt
-            */sha256.txt
+            */proofledger-*.txt
+            */sha256-*.txt
