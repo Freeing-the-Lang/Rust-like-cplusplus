@@ -1,16 +1,19 @@
-name: "Rust-like-C++ — 3OS Build + ProofLedger"
+name: "Rust-like-C++ Full Automation — Parse Rust → C++ → Build → Release"
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - "examples/**/*.rust"
+      - "examples/**/*.ruststyle"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-3os:
-    name: "Build on ${{ matrix.os }}"
+  pipeline:
+    name: "Auto Pipeline"
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -21,56 +24,83 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure
+      - name: Install CMake (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y cmake g++ || true
+
+      - name: Install CMake (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' --yes
+
+      - name: Build rlc (Rust-like-C++ Compiler)
         run: |
           mkdir build
           cd build
           cmake ..
-
-      - name: Build
-        run: |
-          cd build
           cmake --build . --config Release
 
-      - name: Prepare Dist
+      - name: Run rlc on Rust-style input
+        run: |
+          mkdir -p out
+          ./build/rlc examples/hello.rust > out/out.cpp || true
         shell: bash
+
+      - name: Compile generated C++
+        run: |
+          cd out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            g++ out.cpp -o out.exe
+          else
+            g++ out.cpp -o out
+          fi
+        shell: bash
+
+      - name: Prepare dist
         run: |
           mkdir -p dist
 
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp build/Release/rlc.exe dist/rlc-windows.exe
-            OS_TAG="windows"
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            cp build/rlc dist/rlc-macos
-            OS_TAG="macos"
+          OS=""
+          if [ "${{ runner.os }}" = "Windows" ]; then OS="windows"
+          elif [ "${{ runner.os }}" = "macOS" ]; then OS="macos"
+          else OS="linux"; fi
+
+          # 실행파일 export
+          if [ "$OS" = "windows" ]; then
+            cp out/out.exe dist/out-windows.exe
           else
-            cp build/rlc dist/rlc-linux
-            OS_TAG="linux"
+            cp out/out dist/out-$OS
           fi
 
-          # OS별 ledger/sha256 파일 생성
-          echo "ProofLedger for Rust-like-C++" > dist/proofledger-${OS_TAG}.txt
-          echo "Commit: $GITHUB_SHA" >> dist/proofledger-${OS_TAG}.txt
-          echo "Build OS: ${{ runner.os }}" >> dist/proofledger-${OS_TAG}.txt
-          echo "Timestamp: $(date)" >> dist/proofledger-${OS_TAG}.txt
+          # ProofLedger
+          echo "Rust-like-C++ Automation ProofLedger" > dist/proofledger-$OS.txt
+          echo "Commit: $GITHUB_SHA" >> dist/proofledger-$OS.txt
+          echo "Source Rust: examples/hello.rust" >> dist/proofledger-$OS.txt
+          echo "Generated C++: out/out.cpp" >> dist/proofledger-$OS.txt
+          echo "Timestamp: $(date)" >> dist/proofledger-$OS.txt
 
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile dist/rlc-windows.exe SHA256 > dist/sha256-${OS_TAG}.txt
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            shasum -a 256 dist/rlc-macos > dist/sha256-${OS_TAG}.txt
+          # SHA256
+          cd dist
+          if [ "$OS" = "windows" ]; then
+            certutil -hashfile out-windows.exe SHA256 > sha256-$OS.txt
+          elif [ "$OS" = "macOS" ]; then
+            shasum -a 256 out-macos > sha256-$OS.txt
           else
-            sha256sum dist/rlc-linux > dist/sha256-${OS_TAG}.txt
+            sha256sum out-linux > sha256-$OS.txt
           fi
+        shell: bash
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rlc-${{ runner.os }}
+          name: out-${{ runner.os }}
           path: dist/
 
   release:
-    name: Auto Release
-    needs: build-3os
+    name: "Auto Release"
+    needs: pipeline
     runs-on: ubuntu-latest
 
     steps:
@@ -82,7 +112,7 @@ jobs:
       - name: Generate Tag
         id: tag
         run: |
-          VERSION="v1.0.$(date +%Y%m%d%H%M)"
+          VERSION="v1.2.$(date +%Y%m%d%H%M)"
           echo "tag=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create Tag
@@ -93,13 +123,13 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
 
-      - name: Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           files: |
-            */rlc-linux
-            */rlc-macos
-            */rlc-windows.exe
+            */out-linux
+            */out-macos
+            */out-windows.exe
             */proofledger-*.txt
             */sha256-*.txt
