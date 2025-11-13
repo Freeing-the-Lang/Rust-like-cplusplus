@@ -42,24 +42,70 @@ jobs:
           cmake ..
           cmake --build . --config Release
 
-      - name: Run rlc on Rust-like file
+      - name: Run rlc on Rust-like file (with example auto-generation)
         run: |
           mkdir -p out
+          mkdir -p examples   # ensure directory exists
 
-          # Rust-like source file (ensure exists)
-          if [ ! -f examples/hello.rust ]; then
-            echo 'fn main() { print(1); }' > examples/hello.rust
+          # 1) Auto-generate example set if empty
+          if [ -z "$(ls -1 examples/*.rust 2>/dev/null || true)" ]; then
+            echo "[AUTO] No examples/*.rust found → creating default set..."
+
+            cat > examples/hello.rust << 'EOF'
+fn main() {
+    let x = 10;
+    let y = x + 20;
+    print(x);
+    print(y);
+}
+EOF
+
+            cat > examples/arithmetic.rust << 'EOF'
+fn main() {
+    let a = 1;
+    let b = 2;
+    let c = a + b * 3;
+    print(c);
+}
+EOF
+
+            cat > examples/control_flow.rust << 'EOF'
+fn main() {
+    let n = 3;
+    if n == 3 {
+        print(3);
+    } else {
+        print(0);
+    }
+}
+EOF
           fi
 
-          # Run Transpiler
+          echo "=== Available Rust-like examples ==="
+          ls -1 examples/*.rust
+
+          # 2) Ensure main example exists
+          if [ ! -f examples/hello.rust ]; then
+            echo "[AUTO] Missing hello.rust → re-create default"
+            cat > examples/hello.rust << 'EOF'
+fn main() {
+    let x = 10;
+    let y = x + 20;
+    print(x);
+    print(y);
+}
+EOF
+          fi
+
+          # 3) Run Transpiler
           ./build/rlc examples/hello.rust > out/out.cpp || true
 
           echo "=== Generated C++ ==="
           cat out/out.cpp || true
 
-          # If missing main, auto insert fallback
+          # 4) Fallback main() to avoid macOS linker failure
           if ! grep -q "main()" out/out.cpp; then
-            echo "[WARN] main() missing. Auto-generating fallback main."
+            echo "[WARN] No main() in out.cpp → auto insert fallback main"
             echo '#include <iostream>' > out/out.cpp
             echo 'int main(){ std::cout<<"fallback"<<std::endl; return 0; }' >> out/out.cpp
           fi
@@ -150,3 +196,5 @@ jobs:
             */out-windows.exe
             */proofledger-*.txt
             */sha256-*.txt
+            examples/*.rust
+            */out.cpp
